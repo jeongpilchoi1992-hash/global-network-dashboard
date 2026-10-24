@@ -7,8 +7,9 @@
 - 대외보고 일정용: 최근 정기보고서 접수 목록(filed). build_deadlines.py가 공시 항목 완료 여부를 여기서 읽는다.
 
 GitHub Actions에서 env DART_API_KEY(secrets)로 실행한다(hanwha-markets.yml 평일 2회, update-data.yml 주간).
-키가 없거나 표를 못 찾으면 기존 숫자를 그대로 두고 접수 목록(filed)만 고친다. 출자현황 호출이 모두 실패하면
-지분율·출자는 직전 파일 값을 이어 쓴다. 표준 라이브러리만 쓰며 LLM을 쓰지 않는다.
+키가 없거나, 목록·원문 받기가 한 번이라도 실패하거나, 표를 못 찾으면 기존 숫자를 그대로 두고 접수 목록(filed)만 고친다
+(일시 오류로 예전 기간으로 되돌아가지 않게). 출자현황은 직전 파일보다 새 보고서에서만 다시 받고, 실패하면 직전 값을 이어 쓴다.
+표준 라이브러리만 쓰며 LLM을 쓰지 않는다.
 """
 import datetime as dt
 import html
@@ -221,12 +222,13 @@ def invest_rows(api_list):
 
 
 def fetch_doc(key, rcept_no):
+    """원문 텍스트 목록. 받기 실패(시간 초과, zip이 아닌 오류 응답)는 None으로 '표 없음'([])과 구분한다."""
     try:
         raw = get("document.xml", crtfc_key=key, rcept_no=rcept_no)
         z = zipfile.ZipFile(io.BytesIO(raw))
-    except Exception as e:  # noqa: BLE001  오류 응답(zip 아님)·시간 초과는 '표 없음'으로 본다
+    except Exception as e:  # noqa: BLE001
         print(f"  원문 받기 실패 {rcept_no}: {e}")
-        return []
+        return None
     texts = []
     with z:
         for n in z.namelist():
@@ -268,42 +270,46 @@ def main():
     today = dt.datetime.now(dt.timezone(dt.timedelta(hours=9))).date()
     rows = json.loads(get("list.json", crtfc_key=key, corp_code=CORP_CODE, pblntf_ty="A", page_count=100,
                           bgn_de=(today - dt.timedelta(days=550)).strftime("%Y%m%d"), end_de=today.strftime("%Y%m%d")))
+    if rows.get("status") != "000":  # 요청 한도·점검·키 오류: 아무것도 바꾸지 않는다
+        print(f"공시 목록 받기 실패 {rows.get('status')} {rows.get('message')} (기존 파일 유지)")
+        return 0
     reps = periodic_reports(rows.get("list", []))
     filed = [{"year": r["year"], "period": r["period"], "name": r["report_nm"].strip(), "rcept_dt": r["rcept_dt"]} for r in reps]
     prev = json.loads(OUT.read_text(encoding="utf-8")) if OUT.exists() else {}
     order = lambda r: (int(r["year"]), MONTHS[r["period"]])  # noqa: E731
     annual = next((r for r in reps if r["period"] == "FY"), None)
     # 사업보고서 1건 + 그 뒤 분기·반기보고서 중 요약재무정보가 있는 가장 최근 1건
-    chosen, docs = [], {}
-    if annual:
-        docs[annual["rcept_no"]] = fetch_doc(key, annual["rcept_no"])
-        subs = parse_summary(docs[annual["rcept_no"]])
-        if subs:
-            chosen.append((annual, subs))
-    for r in reps:
-        if r["period"] == "FY" or (annual and order(r) <= order(annual)):
-            continue
+    chosen, docs, failed = [], {}, False
+    for r in ([annual] if annual else []) + [r for r in reps if r["period"] != "FY" and not (annual and order(r) <= order(annual))]:
         docs[r["rcept_no"]] = fetch_doc(key, r["rcept_no"])
+        if docs[r["rcept_no"]] is None:
+            failed = True
+            break
         subs = parse_summary(docs[r["rcept_no"]])
         print(f"  {r['report_nm'].strip()}: 요약재무정보 {', '.join(sorted(subs)) or '없음'}")
         if subs:
             chosen.append((r, subs))
-            break
-    if not chosen:
-        print("종속기업 요약재무정보 표를 찾지 못함 (숫자는 기존 파일 유지, 접수 목록만 갱신)")
+            if r is not annual:
+                break
+    if failed or not chosen:
+        print("원문 받기 실패 또는 요약재무정보 표 없음 (숫자는 기존 파일 유지, 접수 목록만 갱신)")
         if prev and prev.get("filed") != filed:
             OUT.write_text(json.dumps({**prev, "filed": filed}, ensure_ascii=False, indent=1), encoding="utf-8")
         return 0
     chosen.sort(key=lambda x: order(x[0]))
-    # 지분율·출자: 최신 보고서부터 이전 정기보고서로 내려가며 타법인 출자현황 → 주석 지분율 표 → 직전 파일 값
+    # 지분율·출자: 최신 보고서부터 내려가되 직전 파일의 출자현황 보고서보다 오래된 것은 받지 않는다 → 주석 지분율 표 → 직전 파일 값
+    pr = (prev.get("invest") or {}).get("report") or {}
+    floor = (int(pr["year"]), MONTHS[pr["period"]], pr.get("rcept_no", "")) if pr.get("year") and pr.get("period") in MONTHS else None
     invest, invest_rep = {}, None
     for rep in (r for r in reps if order(r) <= order(chosen[-1][0])):
+        if floor and (*order(rep), rep["rcept_no"]) < floor:
+            break
         invest = fetch_invest(key, rep)
         if invest:
             invest_rep = rep
             break
     if not invest and (prev.get("invest") or {}).get("rows"):
-        print("  타법인 출자현황 모두 실패: 직전 파일 값 유지")
+        print("  새 타법인 출자현황 없음: 직전 파일 값 유지")
         invest = prev["invest"]["rows"]
     stakes = {k: v["end_stake"] for k, v in invest.items() if v.get("end_stake")}
     source = {k: "타법인 출자현황" for k in stakes}

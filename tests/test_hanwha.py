@@ -82,7 +82,7 @@ class DartFetchFallbackTest(unittest.TestCase):
             {"report_nm": "사업보고서 (2025.12)", "rcept_no": "20260310000001", "rcept_dt": "20260310"}]
     SG_ROW = {"inv_prm": "Pinetree Securities Pte.Ltd.", "trmend_blce_qota_rt": "100.00", "trmend_blce_acntbk_amount": "9,000,000,000"}
 
-    def run_main(self, invest_ok=(), docs_ok=True, prev=None):
+    def run_main(self, invest_ok=(), docs_ok=True, prev=None, doc_fail=(), list_status="000"):
         import io as _io
         import tempfile
         import zipfile as _zip
@@ -91,13 +91,18 @@ class DartFetchFallbackTest(unittest.TestCase):
         buf = _io.BytesIO()
         with _zip.ZipFile(buf, "w") as z:
             z.writestr("a.xml", DOC)
+        buf_empty = _io.BytesIO()
+        with _zip.ZipFile(buf_empty, "w") as z:
+            z.writestr("a.xml", "<html><body>표 없음</body></html>")
 
         def get(path, **q):
             if path == "list.json":
-                return json.dumps({"status": "000", "list": self.LIST}).encode()
+                return json.dumps({"status": list_status, "message": "m", "list": self.LIST if list_status == "000" else []}).encode()
             if path == "document.xml":
+                if q["rcept_no"] in doc_fail:
+                    raise TimeoutError("timed out")
                 if not docs_ok:
-                    return b'{"status":"013"}'
+                    return buf_empty.getvalue()
                 return buf.getvalue()
             ok = (q["bsns_year"], q["reprt_code"]) in invest_ok
             return json.dumps({"status": "000", "list": [self.SG_ROW]} if ok else {"status": "013", "message": "no data"}).encode()
@@ -129,6 +134,23 @@ class DartFetchFallbackTest(unittest.TestCase):
         d = self.run_main(docs_ok=False, prev=prev)
         self.assertEqual(d["periods"], [{"label": "1H26"}])
         self.assertEqual([f["period"] for f in d["filed"]], ["9M", "1H", "FY"])
+
+    def test_document_download_failure_keeps_periods(self):
+        prev = {"periods": [{"label": "FY2025"}, {"label": "1H26"}], "filed": []}
+        d = self.run_main(invest_ok={("2026", "11014")}, prev=prev, doc_fail={"20261113000001"})  # 3분기 원문만 시간 초과
+        self.assertEqual(d["periods"], prev["periods"])  # 예전 기간으로 되돌아가지 않음
+        self.assertEqual([f["period"] for f in d["filed"]], ["9M", "1H", "FY"])
+
+    def test_list_error_status_changes_nothing(self):
+        prev = {"periods": [{"label": "1H26"}], "filed": [{"period": "1H"}]}
+        self.assertEqual(self.run_main(prev=prev, list_status="020"), prev)
+
+    def test_invest_does_not_fall_back_below_previous_report(self):
+        prev = {"invest": {"report": {"name": "분기보고서 (2026.09)", "year": "2026", "period": "9M", "rcept_no": "20261113000001"},
+                           "rows": {"SG": {"end_book": 9500.0, "end_stake": 100.0}}}}
+        d = self.run_main(invest_ok={("2026", "11012")}, prev=prev)  # 3분기 출자현황 일시 실패, 반기는 정상
+        self.assertEqual(d["invest"]["report"]["period"], "9M")
+        self.assertEqual(d["invest"]["rows"]["SG"]["end_book"], 9500.0)
 
 
 class DeadlinesTest(unittest.TestCase):
