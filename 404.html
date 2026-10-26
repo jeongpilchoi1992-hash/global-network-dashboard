@@ -1,27 +1,19 @@
-﻿<!DOCTYPE html>
+<!doctype html>
 <html lang="ko">
 <head>
-  <meta charset="utf-8">
-  <title>Moved to hanwha-global/gnt</title>
-  <meta http-equiv="refresh" content="0;url=https://hanwha-global.github.io/gnt/">
-  <link rel="canonical" href="https://hanwha-global.github.io/gnt/">
-  <script>
-    (function () {
-      var dest = "https://hanwha-global.github.io/gnt/";
-      var prefix = "/global-network-dashboard";
-      var path = location.pathname || "";
-      if (path.indexOf(prefix) === 0) path = path.slice(prefix.length);
-      if (path === "/") path = "";
-      location.replace(dest.replace(/\/$/, "") + path + (location.search || "") + (location.hash || ""));
-    })();
-  </script>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>주소 이전 안내</title>
+<link rel="canonical" href="https://hanwha-global.github.io/gnt/">
+<script>
+  // 옛 주소(…github.io/global-network-dashboard/…)의 하위 경로·#탭을 그대로 새 주소로 옮긴다
+  var rest = location.pathname.replace(/^\/global-network-dashboard\/?/, "");
+  location.replace("https://hanwha-global.github.io/gnt/" + rest + location.search + location.hash);
+</script>
+<noscript><meta http-equiv="refresh" content="0; url=https://hanwha-global.github.io/gnt/"></noscript>
+<style>body{font-family:system-ui,sans-serif;background:#0f1b33;color:#e8ecf4;display:grid;place-items:center;min-height:100vh;margin:0}a{color:#f59e3b}</style>
 </head>
 <body>
-  <p>대시보드가 <a id="to" href="https://hanwha-global.github.io/gnt/">https://hanwha-global.github.io/gnt/</a> 로 이동했습니다.</p>
-  <script>
-    var a = document.getElementById("to");
-    a.href += (location.hash || "");
-    a.textContent = a.href;
-  </script>
+<p>대시보드 주소가 바뀌었습니다: <a href="https://hanwha-global.github.io/gnt/">https://hanwha-global.github.io/gnt/</a></p>
 </body>
 </html>
