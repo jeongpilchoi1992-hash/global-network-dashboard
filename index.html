@@ -1,0 +1,27 @@
+﻿<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <title>Moved to hanwha-global/gnt</title>
+  <meta http-equiv="refresh" content="0;url=https://hanwha-global.github.io/gnt/">
+  <link rel="canonical" href="https://hanwha-global.github.io/gnt/">
+  <script>
+    (function () {
+      var dest = "https://hanwha-global.github.io/gnt/";
+      var prefix = "/global-network-dashboard";
+      var path = location.pathname || "";
+      if (path.indexOf(prefix) === 0) path = path.slice(prefix.length);
+      if (path === "/") path = "";
+      location.replace(dest.replace(/\/$/, "") + path + (location.search || "") + (location.hash || ""));
+    })();
+  </script>
+</head>
+<body>
+  <p>대시보드가 <a id="to" href="https://hanwha-global.github.io/gnt/">https://hanwha-global.github.io/gnt/</a> 로 이동했습니다.</p>
+  <script>
+    var a = document.getElementById("to");
+    a.href += (location.hash || "");
+    a.textContent = a.href;
+  </script>
+</body>
+</html>
